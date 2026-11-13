@@ -1,0 +1,5 @@
+rule,time_window_minutes,viirs_matched,unique_modis_matched,median_gap_min,mean_gap_min,median_signed_gap_min,median_distance_km,viirs_earlier,viirs_later
+pixel_box,15,349,234,3.0,4.2,2.0,0.459,109,229
+distance_1.5km,15,529,307,3.0,4.25,2.0,0.616,189,324
+pixel_box,30,385,260,3.0,5.45,2.0,0.461,133,241
+distance_1.5km,30,579,339,3.0,5.4,2.0,0.622,222,341

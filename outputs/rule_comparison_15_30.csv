@@ -1,0 +1,5 @@
+rule,time_window_minutes,viirs_matched,viirs_match_percent,unique_modis_matched,modis_match_percent
+pixel_box,15,349,2.12,234,4.5
+distance_1.5km,15,529,3.21,307,5.9
+pixel_box,30,385,2.34,260,5.0
+distance_1.5km,30,579,3.51,339,6.52
