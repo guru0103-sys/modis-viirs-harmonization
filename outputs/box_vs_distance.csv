@@ -1,0 +1,8 @@
+rule,radius_km,time_limit_min,modis_with_viirs_partner,modis_total,share_percent
+distance_only,0.5,15,149,5202,2.86
+distance_only,0.75,15,249,5202,4.79
+distance_only,1.0,15,323,5202,6.21
+distance_only,1.5,15,383,5202,7.36
+distance_only,2.0,15,400,5202,7.69
+distance_only,3.5,15,458,5202,8.8
+existing_pixel_box,,15,234,5202,4.5

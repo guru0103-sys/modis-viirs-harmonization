@@ -1,0 +1,32 @@
+# Python environments
+.venv/
+sklearn-env/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Credentials and secrets
+.env
+.env.*
+!.env.example
+*MAP_KEY*
+*credentials*
+*.pem
+*.key
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.log
+*.tmp
+
+# Raw datasets (download separately if required)
+data/raw/
