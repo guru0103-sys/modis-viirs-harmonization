@@ -1,6 +1,8 @@
 
 import streamlit as st
 import pandas as pd
+from pathlib import Path
+import uuid
 
 from components.theme import apply_theme
 from components.mission_header import render_mission_header
@@ -15,7 +17,21 @@ from components.charts import (
 )
 from components.map import render_hotspot_map
 from components.data_explorer import render_data_explorer
+import sys
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = PROJECT_ROOT / "src"
+
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from pipeline import run_pipeline
+
+
+# ----------------------------------------------------------
+# PAGE CONFIGURATION
+# ----------------------------------------------------------
 
 st.set_page_config(
     page_title="Punjab–Haryana Fire Intelligence",
@@ -27,12 +43,25 @@ apply_theme()
 render_mission_header()
 
 
+# ----------------------------------------------------------
+# DATA LOADING
+# ----------------------------------------------------------
+
 @st.cache_data
 def get_data():
     return load_datasets()
 
 
+def get_active_datasets():
+
+    if "active_datasets" in st.session_state:
+        return st.session_state["active_datasets"]
+
+    return get_data()
+
+
 def get_median_frp(frame):
+
     if frame.empty or "frp" not in frame.columns:
         return None
 
@@ -46,6 +75,10 @@ def get_median_frp(frame):
 
     return float(values.median())
 
+
+# ----------------------------------------------------------
+# INTELLIGENCE PANEL
+# ----------------------------------------------------------
 
 def render_intelligence_panel(viirs, modis, filters):
 
@@ -104,15 +137,13 @@ def render_intelligence_panel(viirs, modis, filters):
     col1.metric(
         "VIIRS median",
         f"{viirs_median:.1f} MW"
-        if viirs_median is not None
-        else "N/A",
+        if viirs_median is not None else "N/A",
     )
 
     col2.metric(
         "MODIS median",
         f"{modis_median:.1f} MW"
-        if modis_median is not None
-        else "N/A",
+        if modis_median is not None else "N/A",
     )
 
     st.divider()
@@ -124,38 +155,197 @@ def render_intelligence_panel(viirs, modis, filters):
     st.write(f"**Confidence:** {filters['confidence']}")
 
     st.caption(
-        "Dataset period: October–November 2024. "
-        "All displayed observations are historical."
+        "Displayed observations belong to the currently loaded dataset."
     )
 
 
 # ----------------------------------------------------------
-# LOAD DATA
+# UPLOAD AND PROCESS PAGE
+# ----------------------------------------------------------
+
+def render_upload_page():
+
+    st.markdown("## Upload & Process")
+    st.caption(
+        "NEW REGION / NEW DATE RANGE / AUTOMATED PROCESSING"
+    )
+
+    st.write(
+        "Upload raw NASA FIRMS MODIS Aqua and VIIRS CSV files. "
+        "The processing pipeline will clean the data, perform "
+        "matching, regenerate diagnostics, and load the results "
+        "into the dashboard."
+    )
+
+    st.info(
+        "Supported input: raw FIRMS CSV files containing "
+        "acq_date, acq_time, latitude, longitude, satellite, "
+        "scan, track, frp, daynight and confidence."
+    )
+
+    modis_file = st.file_uploader(
+        "Upload MODIS Aqua CSV",
+        type=["csv"],
+        key="upload_modis",
+    )
+
+    viirs_file = st.file_uploader(
+        "Upload VIIRS Suomi-NPP CSV",
+        type=["csv"],
+        key="upload_viirs",
+    )
+
+    if st.button(
+        "Process datasets",
+        type="primary",
+        disabled=(modis_file is None or viirs_file is None),
+    ):
+
+        try:
+            with st.spinner("Reading uploaded datasets..."):
+
+                modis_raw = pd.read_csv(
+                    modis_file,
+                    dtype={"acq_time": str},
+                )
+
+                viirs_raw = pd.read_csv(
+                    viirs_file,
+                    dtype={"acq_time": str},
+                )
+
+            st.write("**Uploaded row counts**")
+
+            col1, col2 = st.columns(2)
+            col1.metric("MODIS raw rows", f"{len(modis_raw):,}")
+            col2.metric("VIIRS raw rows", f"{len(viirs_raw):,}")
+
+            session_id = st.session_state.get(
+                "upload_session_id"
+            )
+
+            if session_id is None:
+                session_id = str(uuid.uuid4())
+                st.session_state["upload_session_id"] = session_id
+
+            output_dir = (
+                Path("/tmp")
+                / f"modis_viirs_upload_{session_id}"
+            )
+
+            with st.spinner(
+                "Cleaning, matching and generating diagnostics..."
+            ):
+
+                result = run_pipeline(
+                    modis_raw,
+                    viirs_raw,
+                    output_dir,
+                )
+
+                clean_dir = Path(result["clean_dir"])
+                matched_dir = Path(result["matched_dir"])
+
+                processed_viirs = pd.read_csv(
+                    matched_dir / "viirs_coobserved.csv"
+                )
+
+                processed_modis = pd.read_csv(
+                    clean_dir / "modis_clean.csv"
+                )
+
+                processed_pairs = pd.read_csv(
+                    matched_dir / "matched_pairs.csv"
+                )
+
+                st.session_state["active_datasets"] = (
+                    processed_viirs,
+                    processed_modis,
+                    processed_pairs,
+                )
+
+                st.session_state["uploaded_dataset_active"] = True
+
+            st.success("Datasets processed successfully!")
+
+            st.markdown("### Processing results")
+
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric(
+                "Clean MODIS",
+                f"{result['modis_count']:,}",
+            )
+
+            col2.metric(
+                "Clean VIIRS",
+                f"{result['viirs_count']:,}",
+            )
+
+            col3.metric(
+                "Candidate pairs",
+                f"{result['matched_pair_count']:,}",
+            )
+
+            st.markdown("### Matching summary")
+
+            st.json(result["match_summary"])
+
+            st.markdown("### Diagnostic summary")
+
+            st.json(result["diagnostics_summary"])
+
+            st.caption(
+                f"Generated files are stored in: {result['output_dir']}"
+            )
+
+            st.success(
+                "The dashboard is now using your uploaded datasets. "
+                "Open Overview or the other analytics pages."
+            )
+
+        except Exception as exc:
+
+            st.error("Dataset processing failed.")
+            st.exception(exc)
+
+    st.divider()
+
+    if st.session_state.get("uploaded_dataset_active", False):
+
+        st.success("A processed upload is currently active.")
+
+        if st.button("Restore original project datasets"):
+
+            st.session_state.pop("active_datasets", None)
+            st.session_state["uploaded_dataset_active"] = False
+
+            st.rerun()
+
+
+# ----------------------------------------------------------
+# LOAD ACTIVE DATA
 # ----------------------------------------------------------
 
 try:
-    viirs, modis, matched_pairs = get_data()
+
+    viirs, modis, matched_pairs = get_active_datasets()
 
 except Exception as exc:
+
     st.error(f"Could not load the project data: {exc}")
+
     st.info(
-        "Check the CSV paths in the data/ folders "
+        "Check the CSV paths in the data folders "
         "and see README.md."
     )
+
     st.stop()
 
 
 # ----------------------------------------------------------
-# SIDEBAR FILTERS AND NAVIGATION
+# SINGLE SIDEBAR NAVIGATION
 # ----------------------------------------------------------
-
-filters = render_filters(viirs, modis)
-
-viirs_filtered, modis_filtered = apply_filters(
-    viirs,
-    modis,
-    filters,
-)
 
 page = st.sidebar.radio(
     "Navigation",
@@ -164,189 +354,213 @@ page = st.sidebar.radio(
         "Daily Fire Activity",
         "Data & Matching",
         "Data Explorer",
+        "Upload & Process",
     ],
 )
 
 st.sidebar.divider()
+
 st.sidebar.caption("MODIS–VIIRS HARMONIZATION")
+
+if st.session_state.get("uploaded_dataset_active", False):
+    st.sidebar.success("Uploaded dataset active")
+else:
+    st.sidebar.caption("Original project dataset active")
+
 st.sidebar.caption("Historical observation mode")
-st.sidebar.caption("Punjab–Haryana · October–November 2024")
 
 
-# ==========================================================
-# OVERVIEW
-# ==========================================================
+# ----------------------------------------------------------
+# UPLOAD PAGE
+# ----------------------------------------------------------
 
-if page == "Overview":
+if page == "Upload & Process":
 
-    st.markdown("## Observation overview")
+    render_upload_page()
 
-    st.caption(
-        "REGIONAL FIRE ACTIVITY  /  PUNJAB–HARYANA  /  2024"
+
+# ----------------------------------------------------------
+# DASHBOARD FILTERS
+# ----------------------------------------------------------
+
+else:
+
+    filters = render_filters(viirs, modis)
+
+    viirs_filtered, modis_filtered = apply_filters(
+        viirs,
+        modis,
+        filters,
     )
 
-    render_metrics(
-        viirs_filtered,
-        modis_filtered,
-        matched_pairs,
-    )
+    # ======================================================
+    # OVERVIEW
+    # ======================================================
 
-    st.divider()
+    if page == "Overview":
 
-    map_column, intelligence_column = st.columns(
-        [2.15, 1],
-        gap="large",
-    )
-
-    with map_column:
-
-        st.markdown("### Geospatial hotspot distribution")
+        st.markdown("## Observation overview")
 
         st.caption(
-            "Interactive satellite detection locations"
+            "REGIONAL FIRE ACTIVITY / SATELLITE OBSERVATIONS"
         )
 
-        render_hotspot_map(
+        render_metrics(
             viirs_filtered,
             modis_filtered,
-            filters["sensor"],
+            matched_pairs,
         )
 
-    with intelligence_column:
+        st.divider()
 
-        with st.container(
-            border=True,
-            key="intelligence_panel",
-        ):
-            render_intelligence_panel(
-                viirs_filtered,
-                modis_filtered,
-                filters,
+        map_column, intelligence_column = st.columns(
+            [2.15, 1],
+            gap="large",
+        )
+
+        with map_column:
+
+            st.markdown("### Geospatial hotspot distribution")
+
+            st.caption(
+                "Interactive satellite detection locations"
             )
 
-    st.divider()
+            render_hotspot_map(
+                viirs_filtered,
+                modis_filtered,
+                filters["sensor"],
+            )
 
-    st.markdown("### Temporal activity")
+        with intelligence_column:
 
-    st.caption(
-        "Daily satellite detection counts across the selected period"
-    )
+            with st.container(
+                border=True,
+                key="intelligence_panel",
+            ):
 
-    render_daily_activity(
-        viirs_filtered,
-        modis_filtered,
-        full_width=True,
-    )
+                render_intelligence_panel(
+                    viirs_filtered,
+                    modis_filtered,
+                    filters,
+                )
 
+        st.divider()
 
-# ==========================================================
-# DAILY FIRE ACTIVITY
-# ==========================================================
+        st.markdown("### Temporal activity")
 
-elif page == "Daily Fire Activity":
+        render_daily_activity(
+            viirs_filtered,
+            modis_filtered,
+            full_width=True,
+        )
 
-    st.markdown("## Temporal analytics")
+    # ======================================================
+    # DAILY FIRE ACTIVITY
+    # ======================================================
 
-    st.caption(
-        "DAILY DETECTION TRENDS  /  FIRE RADIATIVE POWER"
-    )
+    elif page == "Daily Fire Activity":
 
-    st.markdown("### Daily detection activity")
+        st.markdown("## Temporal analytics")
 
-    render_daily_activity(
-        viirs_filtered,
-        modis_filtered,
-        full_width=True,
-    )
+        st.caption(
+            "DAILY DETECTION TRENDS / FIRE RADIATIVE POWER"
+        )
 
-    st.divider()
+        st.markdown("### Daily detection activity")
 
-    st.markdown("### Fire radiative power")
+        render_daily_activity(
+            viirs_filtered,
+            modis_filtered,
+            full_width=True,
+        )
 
-    render_frp_distribution(
-        viirs_filtered,
-        modis_filtered,
-    )
+        st.divider()
 
-    st.divider()
+        st.markdown("### Fire radiative power")
 
-    st.markdown("### Matching method comparison")
+        render_frp_distribution(
+            viirs_filtered,
+            modis_filtered,
+        )
 
-    render_matching_comparison(
-        viirs_filtered,
-        chart_key="daily_matching_comparison",
-    )
+        st.divider()
 
-    st.divider()
+        st.markdown("### Matching method comparison")
 
-    st.markdown("### Daily matching trends")
+        render_matching_comparison(
+            viirs_filtered,
+            chart_key="daily_matching_comparison",
+        )
 
-    render_daily_matching_trends(viirs_filtered)
+        st.divider()
 
+        st.markdown("### Daily matching trends")
 
-# ==========================================================
-# DATA AND MATCHING
-# ==========================================================
+        render_daily_matching_trends(viirs_filtered)
 
-elif page == "Data & Matching":
+    # ======================================================
+    # DATA AND MATCHING
+    # ======================================================
 
-    st.markdown("## Data and matching laboratory")
+    elif page == "Data & Matching":
 
-    st.caption(
-        "MATCHING DIAGNOSTICS  /  CANDIDATE ASSOCIATIONS"
-    )
+        st.markdown("## Data and matching laboratory")
 
-    st.markdown("### Matching rule comparison")
+        st.caption(
+            "MATCHING DIAGNOSTICS / CANDIDATE ASSOCIATIONS"
+        )
 
-    render_matching_comparison(
-        viirs_filtered,
-        chart_key="data_matching_comparison",
-    )
+        st.markdown("### Matching rule comparison")
 
-    st.divider()
+        render_matching_comparison(
+            viirs_filtered,
+            chart_key="data_matching_comparison",
+        )
 
-    st.markdown("### Daily candidate matching trends")
+        st.divider()
 
-    render_daily_matching_trends(viirs_filtered)
+        st.markdown("### Daily candidate matching trends")
 
-    st.divider()
+        render_daily_matching_trends(viirs_filtered)
 
-    st.markdown("### Filtered dataset overview")
+        st.divider()
 
-    col1, col2, col3 = st.columns(3)
+        st.markdown("### Filtered dataset overview")
 
-    col1.metric(
-        "VIIRS records",
-        f"{len(viirs_filtered):,}",
-    )
+        col1, col2, col3 = st.columns(3)
 
-    col2.metric(
-        "MODIS records",
-        f"{len(modis_filtered):,}",
-    )
+        col1.metric(
+            "VIIRS records",
+            f"{len(viirs_filtered):,}",
+        )
 
-    col3.metric(
-        "Combined records",
-        f"{len(viirs_filtered) + len(modis_filtered):,}",
-    )
+        col2.metric(
+            "MODIS records",
+            f"{len(modis_filtered):,}",
+        )
 
-    st.caption(
-        "Matching flags are read from existing scientific outputs. "
-        "The frontend does not recalculate matching results."
-    )
+        col3.metric(
+            "Combined records",
+            f"{len(viirs_filtered) + len(modis_filtered):,}",
+        )
 
+        st.caption(
+            "Matching flags are read from existing scientific outputs. "
+            "The frontend does not recalculate matching results."
+        )
 
-# ==========================================================
-# DATA EXPLORER
-# ==========================================================
+    # ======================================================
+    # DATA EXPLORER
+    # ======================================================
 
-elif page == "Data Explorer":
+    elif page == "Data Explorer":
 
-    render_data_explorer(
-        viirs_filtered,
-        modis_filtered,
-        matched_pairs,
-    )
+        render_data_explorer(
+            viirs_filtered,
+            modis_filtered,
+            matched_pairs,
+        )
 
 
 # ----------------------------------------------------------
@@ -355,5 +569,5 @@ elif page == "Data Explorer":
 
 st.sidebar.divider()
 st.sidebar.caption("EARTH OBSERVATION ANALYTICS")
-st.sidebar.caption("Historical data · 2024")
+st.sidebar.caption("Historical satellite data")
 
