@@ -30,3 +30,6 @@ Thumbs.db
 
 # Raw datasets (download separately if required)
 data/raw/
+modis-viirs-project.zip
+frontend-handoff.zip
+*.zip

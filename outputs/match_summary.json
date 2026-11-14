@@ -1,12 +1,12 @@
 {
   "viirs_total": 16476,
-  "viirs_matched_to_modis": 492,
-  "viirs_only_modis_missed": 15984,
-  "pct_viirs_missed_by_modis": 97.0,
+  "viirs_matched_to_modis": 385,
+  "viirs_only_modis_missed": 16091,
+  "pct_viirs_missed_by_modis": 97.7,
   "modis_total": 5202,
-  "modis_confirmed_by_viirs": 323,
-  "modis_only_not_confirmed": 4879,
-  "pct_modis_not_confirmed": 93.8,
-  "median_match_distance_km": 0.48,
-  "match_minutes": 60
+  "modis_confirmed_by_viirs": 260,
+  "modis_only_not_confirmed": 4942,
+  "pct_modis_not_confirmed": 95.0,
+  "median_match_distance_km": 0.46,
+  "match_minutes": 30
 }

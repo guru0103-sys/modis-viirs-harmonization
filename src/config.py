@@ -30,5 +30,5 @@ VIIRS_SOURCE = "VIIRS_SNPP_SP"   # Suomi NPP (flies close in time to Aqua)
 MODIS_SATELLITE = "Aqua"
 
 # Matching rules
-MATCH_MINUTES = 60     # max time gap between the two detections
+MATCH_MINUTES = 30     # max time gap between the two detections
 SEARCH_RADIUS_KM = 3.5 # candidate search radius (covers the biggest MODIS pixel at scan edge)
